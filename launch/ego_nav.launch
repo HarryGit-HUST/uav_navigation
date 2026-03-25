@@ -1,0 +1,47 @@
+<launch>
+  <!-- 注意1：把所有的 find mission 全部替换为 find uav_navigation -->
+  <include file="$(find uav_navigation)/launch/advanced_param.xml">
+  
+    <!-- 地图尺寸 -->
+    <arg name="map_size_x_" value="50.0"/>
+    <arg name="map_size_y_" value="50.0"/>
+    <arg name="map_origin_x_" value="-25.0"/>
+    <arg name="map_origin_y_" value="-25.0"/>
+
+    <!-- 注意2：空间降维核心封印！-->
+    <!-- 如果你的定高是 0.6m，这里设置范围刚好卡住这层空间 -->
+    <arg name="map_size_z_" value="0.40"/>  <!-- 原来是 1.20 -->
+    <arg name="ground_height" value="0.4"/> <!-- 原来是 0.3。这样 Z 轴就被卡死在 0.4 到 0.8 之间 -->
+
+    <!-- 里程计和点云话题 -->
+    <arg name="odometry_topic" value="/mavros/local_position/odom"/>
+    <!-- 这里接收的是你第一步写的“加厚点云”的发布话题，假设还是 /cloud_registered -->
+    <arg name="cloud_topic" value="/cloud_registered"/>
+    <arg name="scan_topic" value=""/>
+
+    <arg name="max_vel" value="1.0" />
+    <arg name="max_acc" value="1.0" />
+    <arg name="planning_horizon" value="5.0" /> 
+    <arg name="use_distinctive_trajs" value="false" />
+
+    <!-- 其他参数保留 -->
+    <arg name="lambda_smooth" value="0.3" />
+    <arg name="lambda_collision" value="2.0" />
+    <arg name="lambda_feasibility" value="0.1" />
+    <arg name="lambda_fitness" value="1.3" />
+    <arg name="swarm_clearance" value="0.5" />
+    <arg name="dist" value="0.20" />
+    <arg name="flight_type" value="1" />
+    <arg name="realworld_experiment" value="true" />
+  </include>
+
+  <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen" respawn="true">
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+    <param name="traj_server/limit_yaw_change" value="0.0" type="double"/>
+  </node>
+  
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find uav_navigation)/launch/ego.rviz" required="false" />
+
+  <!-- 注意3：在这里直接启动你用 C++ 写的 ego_controller_node -->
+  <node pkg="uav_navigation" name="ego_controller_node" type="ego_controller_node" output="screen" />
+</launch>

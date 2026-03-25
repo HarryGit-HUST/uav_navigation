@@ -1,0 +1,51 @@
+<launch>
+  <!-- ego_planner 仿真 -->
+  <include file="$(find mission)/launch/advanced_param.xml">
+    <!-- 地图尺寸 -->
+    <arg name="map_size_x_" value="50.0"/>
+    <arg name="map_size_y_" value="50.0"/>
+    <arg name="map_origin_x_" value="-25.0"/>
+    <arg name="map_origin_y_" value="-25.0"/>
+    <!-- 可以通过限制ground_height和map_size_z来使得飞机在特定高度飞行 -->
+    <!-- 两者为相加的关系，即范围是从ground_height到ground_height+map_size_z -->
+    <arg name="map_size_z_" value="1.20"/>
+    <arg name="ground_height" value="0.3"/><!-- 巡航用 -->
+    <!-- 虚拟天花板高度要小于等于ground_height+z_size，否则重置该高度 -->
+    <!-- 里程计话题 -->
+    <arg name="odometry_topic" value="/mavros/local_position/odom"/>
+    <!-- 点云信息，仿真中由map_generator产生 -->
+    <arg name="cloud_topic" value="/cloud_registered"/>
+    <!-- scan -->
+    <arg name="scan_topic" value=""/>
+    <!-- 最大速度及加速度 -->
+    <arg name="max_vel" value="1.0" />
+    <arg name="max_acc" value="1.0" />
+    <!-- 规划的范围，一般设置为感知范围的1.5倍 -->
+    <arg name="planning_horizon" value="5.0" /> 
+    <!-- ？ -->
+    <arg name="use_distinctive_trajs" value="false" />
+    <!-- B样条优化参数 -->
+    <arg name="lambda_smooth" value="0.3" />
+    <arg name="lambda_collision" value="2.0" />
+    <arg name="lambda_feasibility" value="0.1" />
+    <arg name="lambda_fitness" value="1.3" />
+    <arg name="swarm_clearance" value="0.5" />
+    <arg name="dist" value="0.20" />
+    <!-- 1: use 2D Nav Goal to select goal  -->
+    <!-- 2: use global waypoints below  -->
+    <!-- 单机建议直接使用rviz指定目标点,多机情况请预设目标点 -->
+    <arg name="flight_type" value="1" />
+    <!-- 仿真 -->
+    <arg name="realworld_experiment" value="true" />
+  </include>
+
+  <!-- trajectory server：由B样条生成轨迹 -->
+  <!-- 偏航角初始值，重要参数 -->
+  <node pkg="ego_planner" name="traj_server" type="traj_server" output="screen" respawn="true">
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+    <param name="traj_server/limit_yaw_change" value="0.0" type="double"/>
+  </node>
+  
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mission)/launch/ego.rviz" required="false" />
+  
+</launch>
