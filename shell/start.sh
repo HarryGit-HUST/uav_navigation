@@ -41,7 +41,7 @@ tmux select-layout -t $SESSION:1 tiled
 # ====================================================
 tmux new-window -t $SESSION:2 -n "nav_and_control"
 # 2.0: 启动 Ego-Planner (记得按上文修改参数压扁地图) + 你刚写的 ego_controller_node
-tmux send-keys -t $SESSION:2.0 "sleep 12; source ${MAIN_WS}/devel/setup.bash; roslaunch uav_navigation ego_2d_nav.launch" C-m
+tmux send-keys -t $SESSION:2.0 "sleep 12; source ${MAIN_WS}/devel/setup.bash; roslaunch uav_navigation ego_nav.launch" C-m
 
 # 2.1: 启动你写的 Mock Testing python 脚本，用来发目标点！
 tmux split-window -v -t $SESSION:2
