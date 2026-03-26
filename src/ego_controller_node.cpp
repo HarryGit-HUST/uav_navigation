@@ -6,6 +6,7 @@
 #include <mavros_msgs/PositionTarget.h>
 #include <cmath>
 #include <algorithm>
+#include <tf/transform_datatypes.h>
 
 ros::Publisher mavros_cmd_pub;
 ros::Publisher ego_goal_pub;
@@ -24,9 +25,9 @@ enum NavState
 NavState nav_state = IDLE;
 
 // 控制与安全参数
-double kp_pos = 0.8;        // 【修改】降低 P 参数，使其更柔和
-double max_v = 1.0;         // 【新增】物理速度绝对限幅 (m/s)
-double arrive_radius = 0.2; // 到达判定半径 (m)
+double kp_pos = 0.8;
+double max_v = 1.0;
+double arrive_radius = 0.2;
 bool has_odom = false;
 bool has_traj = false;
 
@@ -57,9 +58,11 @@ void fsmGoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
     hover_z = current_goal.pose.position.z; // 高度用目标的定高
     hover_yaw = current_odom.pose.pose.orientation.z;
 
-    ego_goal_pub.publish(current_goal); // 转发给黑盒 Ego-Planner
+    ego_goal_pub.publish(current_goal);
     nav_state = FLYING;
-    has_traj = false; // 重置轨迹接收标志
+    has_traj = false;
+    
+    ROS_INFO("[Ego_Controller] 已转发目标给 EGO-Planner，等待轨迹...");
 }
 
 // 3. 接收 Ego 轨迹指令
@@ -67,6 +70,48 @@ void trajCmdCallback(const quadrotor_msgs::PositionCommand::ConstPtr &msg)
 {
     current_traj_cmd = *msg;
     has_traj = true;
+    
+    ROS_DEBUG_STREAM_THROTTLE(2.0, 
+        "[Ego_Controller] 收到轨迹点：" <<
+        " pos=[" << msg->position.x << ", " << msg->position.y << ", " << msg->position.z << "] " <<
+        " vel=[" << msg->velocity.x << ", " << msg->velocity.y << ", " << msg->velocity.z << "]");
+}
+
+// 从四元数提取 yaw 角（ENU 坐标系）
+double getYawFromQuaternion(const geometry_msgs::Quaternion& q)
+{
+    tf::Quaternion tf_q;
+    tf::quaternionMsgToTF(q, tf_q);
+    tf::Matrix3x3 m(tf_q);
+    double roll, pitch, yaw;
+    m.getRPY(roll, pitch, yaw);
+    return yaw;
+}
+
+// 【核心修复】ENU 转 NED 坐标系转换
+// EGO-Planner 输出 ENU 坐标，MAVROS 需要 NED 坐标
+// ENU -> NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
+// 速度同理
+void enuToNed(double x_enu, double y_enu, double z_enu,
+              double& x_ned, double& y_ned, double& z_ned)
+{
+    x_ned = y_enu;
+    y_ned = x_enu;
+    z_ned = -z_enu;
+}
+
+void enuVelToNed(double vx_enu, double vy_enu, double vz_enu,
+                 double& vx_ned, double& vy_ned, double& vz_ned)
+{
+    vx_ned = vy_enu;
+    vy_ned = vx_enu;
+    vz_ned = -vz_enu;
+}
+
+// NED 坐标系下的 yaw 转换：yaw_ned = PI/2 - yaw_enu
+double enuYawToNed(double yaw_enu)
+{
+    return M_PI_2 - yaw_enu;
 }
 
 int main(int argc, char **argv)
@@ -80,11 +125,21 @@ int main(int argc, char **argv)
     ros::Subscriber traj_sub = nh.subscribe("/position_cmd", 10, trajCmdCallback);
 
     mavros_cmd_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 10);
-    ego_goal_pub = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1);
+    ego_goal_pub = nh.advertise<geometry_msgs::PoseStamped>("/ego_planner/goal", 1);
     nav_status_pub = nh.advertise<std_msgs::Int8>("/ego_controller/status", 10);
 
-    ros::Rate rate(30); // 【重要】强制 30Hz 循环发布，绝不能断开 MAVROS
+    ros::Rate rate(30);
 
+    ROS_INFO(" ");
+    ROS_INFO("============================================");
+    ROS_INFO("   [Ego Controller] 节点启动成功！         ");
+    ROS_INFO("   监听话题：/fsm/ego_goal                 ");
+    ROS_INFO("   输出话题：/mavros/setpoint_raw/local    ");
+    ROS_INFO("============================================");
+    ROS_INFO(" ");
+
+    int loop_count = 0;
+    
     while (ros::ok())
     {
         ros::spinOnce();
@@ -94,6 +149,7 @@ int main(int argc, char **argv)
             continue;
         }
 
+        loop_count++;
         mavros_msgs::PositionTarget setpoint;
         // 【尊重原著】使用你原来经过检验的 FRAME_LOCAL_NED = 1
         setpoint.coordinate_frame = 1; 
@@ -146,8 +202,9 @@ int main(int argc, char **argv)
         }
         else
         {
-            // 如果处于 IDLE 或 ARRIVED 状态，本节点闭嘴，不发任何指令
-            // 此时由主控 FSM 接管发悬停指令
+            if (loop_count % 60 == 0) {
+                ROS_INFO_THROTTLE(2.0, "[Ego_Controller] 等待目标点指令... (nav_state=%d)", nav_state);
+            }
         }
 
         std_msgs::Int8 status_msg;
