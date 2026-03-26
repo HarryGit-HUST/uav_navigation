@@ -36,6 +36,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr &msg)
 
 int main(int argc, char **argv)
 {
+    setlocale(LC_ALL, ""); // 防乱码
     ros::init(argc, argv, "cloud_extruder");
     ros::NodeHandle nh;
     // 订阅以前的 2D 话题

@@ -30,6 +30,12 @@ double arrive_radius = 0.2; // 到达判定半径 (m)
 bool has_odom = false;
 bool has_traj = false;
 
+// 【绝杀修复】保存固定悬停点，防止里程计正反馈导致向后直直乱飞！
+double hover_x = 0.0;
+double hover_y = 0.0;
+double hover_z = 0.0;
+double hover_yaw = 0.0;
+
 // 1. 接收里程计
 void odomCallback(const nav_msgs::Odometry::ConstPtr &msg)
 {
@@ -45,6 +51,12 @@ void fsmGoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
     ROS_INFO("[Ego_Controller] 收到长官命令！前往新目标: X=%.2f, Y=%.2f", msg->pose.position.x, msg->pose.position.y);
     ROS_INFO("===========================================\n");
 
+    // 【绝杀修复】在收到命令的瞬间，锁死当前的真实物理坐标作为安全悬停点！
+    hover_x = current_odom.pose.pose.position.x;
+    hover_y = current_odom.pose.pose.position.y;
+    hover_z = current_goal.pose.position.z; // 高度用目标的定高
+    hover_yaw = current_odom.pose.pose.orientation.z;
+
     ego_goal_pub.publish(current_goal); // 转发给黑盒 Ego-Planner
     nav_state = FLYING;
     has_traj = false; // 重置轨迹接收标志
@@ -59,6 +71,7 @@ void trajCmdCallback(const quadrotor_msgs::PositionCommand::ConstPtr &msg)
 
 int main(int argc, char **argv)
 {
+    setlocale(LC_ALL, ""); // 【修复】允许终端输出中文，防乱码！
     ros::init(argc, argv, "ego_controller_node");
     ros::NodeHandle nh("~");
 
@@ -82,31 +95,24 @@ int main(int argc, char **argv)
         }
 
         mavros_msgs::PositionTarget setpoint;
-        setpoint.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED;
+        // 【尊重原著】使用你原来经过检验的 FRAME_LOCAL_NED = 1
+        setpoint.coordinate_frame = 1; 
 
         if (nav_state == FLYING)
         {
             double dist = sqrt(pow(current_goal.pose.position.x - current_odom.pose.pose.position.x, 2) +
                                pow(current_goal.pose.position.y - current_odom.pose.pose.position.y, 2));
 
-            ROS_INFO_THROTTLE(1.0, "[Ego_Controller] 正在飞行... 距离目标点: %.2f 米", dist);
-
             if (dist < arrive_radius)
             {
-                ROS_INFO("[Ego_Controller] 成功到达目标点附近！刹车！");
+                ROS_INFO("[Ego_Controller] 成功到达目标点附近！刹车！误差: %.2f 米", dist);
                 nav_state = ARRIVED;
             }
             else if (has_traj)
             {
                 // --- 丝滑且安全的轨迹追踪 ---
-                // 掩码：控制 VX, VY, PZ, YAW
-                setpoint.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
-                                     mavros_msgs::PositionTarget::IGNORE_PY |
-                                     mavros_msgs::PositionTarget::IGNORE_VZ |
-                                     mavros_msgs::PositionTarget::IGNORE_AFX |
-                                     mavros_msgs::PositionTarget::IGNORE_AFY |
-                                     mavros_msgs::PositionTarget::IGNORE_AFZ |
-                                     mavros_msgs::PositionTarget::IGNORE_YAW_RATE;
+                // 【尊重原著】使用你原来的掩码 0b101111100011 控制 vx vy z yaw
+                setpoint.type_mask = 0b101111100011;
 
                 double err_x = current_traj_cmd.position.x - current_odom.pose.pose.position.x;
                 double err_y = current_traj_cmd.position.y - current_odom.pose.pose.position.y;
@@ -120,17 +126,21 @@ int main(int argc, char **argv)
                 setpoint.position.z = current_traj_cmd.position.z;
                 setpoint.yaw = current_traj_cmd.yaw;
 
+                // 【新增监控】每秒打印一次底层控制数据，让你查错一目了然
+                ROS_INFO_THROTTLE(1.0, "[Ego执行器] 距目标:%.2fm | 期望点(%.2f,%.2f) | 误差(%.2f,%.2f) | 发送速度(%.2f,%.2f)", 
+                                  dist, current_traj_cmd.position.x, current_traj_cmd.position.y, err_x, err_y, setpoint.velocity.x, setpoint.velocity.y);
+
                 mavros_cmd_pub.publish(setpoint);
             }
             else
             {
-                // 【绝杀修复】还没收到轨迹时，强制原地悬停，防止掉 Offboard
-                ROS_WARN_THROTTLE(0.5, "[Ego_Controller] 等待 Ego-Planner 吐出轨迹，安全悬停中...");
+                // 【绝杀修复】还没收到轨迹时，使用锁死的固态悬停点！防止正反馈乱飞！
+                ROS_WARN_THROTTLE(0.5, "[Ego_Controller] 等待 Ego-Planner 吐出轨迹，安全定点悬停中...");
                 setpoint.type_mask = 0b101111111000; // 纯位置掩码
-                setpoint.position.x = current_odom.pose.pose.position.x;
-                setpoint.position.y = current_odom.pose.pose.position.y;
-                setpoint.position.z = current_goal.pose.position.z;
-                setpoint.yaw = current_odom.pose.pose.orientation.z; // 粗略保持yaw
+                setpoint.position.x = hover_x;
+                setpoint.position.y = hover_y;
+                setpoint.position.z = hover_z;
+                setpoint.yaw = hover_yaw; 
                 mavros_cmd_pub.publish(setpoint);
             }
         }

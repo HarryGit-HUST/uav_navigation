@@ -8,10 +8,13 @@
 #include <std_msgs/Int8.h>
 #include <Eigen/Dense>
 #include <tf/transform_datatypes.h>
+#include <thread>
+#include <iostream>
 
 // 状态机枚举（完全对齐比赛任务）
 enum class MissionState
 {
+    WAIT_FOR_START, // 【新增】等待键盘按1启动
     IDLE,
     TAKEOFF,
     WAIT_FOR_MAP,
@@ -56,8 +59,11 @@ private:
     ros::Time state_start_time_;
     int ego_nav_status_; // 0:待机, 1:飞行中, 2:已到达
 
+    // 【新增】启动标志位
+    bool is_start_pressed_;
+
 public:
-    MissionController(ros::NodeHandle &nh) : nh_(nh), current_state_(MissionState::IDLE), ego_nav_status_(0)
+    MissionController(ros::NodeHandle &nh) : nh_(nh), current_state_(MissionState::WAIT_FOR_START), ego_nav_status_(0), is_start_pressed_(false)
     {
         // 1. 读取参数
         nh_.param("mission/wp_recog_x", wp_recog_.x(), 5.0);
@@ -80,6 +86,33 @@ public:
         set_mode_client_ = nh_.serviceClient<mavros_msgs::SetMode>("/mavros/set_mode");
 
         ROS_INFO("[Boss] 任务指挥官已就绪！采用解耦架构，Ego-Planner 作为外部导航引擎。");
+
+        // 【新增】开启监听键盘的独立线程，绝不阻塞 ROS
+        std::thread(&MissionController::keyboardThread, this).detach();
+    }
+
+    // 【新增】键盘监听线程
+    void keyboardThread()
+    {
+        int cmd;
+        std::cout << "\n\n*************************************************************" << std::endl;
+        std::cout << "  [终极指令] 系统初始化完成！等待 Gazebo 和 雷达 加载！" << std::endl;
+        std::cout << "  >>>> 请在终端输入 1 并回车，授权无人机起飞！ <<<<" << std::endl;
+        std::cout << "*************************************************************\n\n"
+                  << std::endl;
+        while (std::cin >> cmd)
+        {
+            if (cmd == 1)
+            {
+                is_start_pressed_ = true;
+                ROS_INFO("[Boss] 收到起飞指令！开始任务执行流！");
+                break;
+            }
+            else
+            {
+                ROS_WARN("无效指令，请输入 1 确认起飞。");
+            }
+        }
     }
 
     // 核心 Tick 函数 (建议在 main 中以 20Hz 运行)
@@ -90,6 +123,14 @@ public:
 
         switch (current_state_)
         {
+        case MissionState::WAIT_FOR_START:
+            // 【新增】只有按下1，才进入 IDLE 开始索要控制权
+            if (is_start_pressed_)
+            {
+                current_state_ = MissionState::IDLE;
+            }
+            break;
+
         case MissionState::IDLE:
             ROS_INFO_THROTTLE(1.0, "[IDLE] 尝试解锁和切换 OFFBOARD...");
             if (setOffboardAndArm())
@@ -195,6 +236,7 @@ public:
             break;
 
         case MissionState::RETURN_TO_LAUNCH:
+            ROS_INFO_THROTTLE(1.0, "[FSM-Boss] 任务六：正在返航，等待小脑(Ego)汇报... 当前状态码: %d", ego_nav_status_);
             if (ego_nav_status_ == 2)
             {
                 current_state_ = MissionState::LANDING;
@@ -244,7 +286,9 @@ private:
     void publishHoverSetpoint(double x, double y, double z)
     {
         mavros_msgs::PositionTarget msg;
-        msg.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED;
+        // 【尊重原著】跟 ego_controller 严格保持一致的坐标系！
+        msg.coordinate_frame = 1;
+
         // 掩码：只控制位置 X, Y, Z 和 Yaw (忽略速度和加速度)
         msg.type_mask = mavros_msgs::PositionTarget::IGNORE_VX |
                         mavros_msgs::PositionTarget::IGNORE_VY |
@@ -321,6 +365,7 @@ private:
 
 int main(int argc, char **argv)
 {
+    setlocale(LC_ALL, ""); // 【修复】允许终端输出中文，防乱码！
     ros::init(argc, argv, "main_fsm_node");
     ros::NodeHandle nh("~");
 
