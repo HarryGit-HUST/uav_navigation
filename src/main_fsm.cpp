@@ -13,6 +13,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
+#include <sstream>
+
+// 从四元数提取 yaw 角
+double getYawFromQuaternion(const geometry_msgs::Quaternion& q)
+{
+    tf::Quaternion tf_q;
+    tf::quaternionMsgToTF(q, tf_q);
+    tf::Matrix3x3 m(tf_q);
+    double roll, pitch, yaw;
+    m.getRPY(roll, pitch, yaw);
+    return yaw;
+}
 
 // 状态机枚举
 enum class MissionState
@@ -63,40 +75,41 @@ private:
     ros::Time state_start_time_;
     int ego_nav_status_;
     bool start_command_received_;
+    bool pcl_enabled_;  // PCL 是否已启动
 
     // 键盘输入
     int keyboard_fd_;
     struct termios cooked_tattr_;
 
 public:
-    MissionController(ros::NodeHandle &nh) 
-        : nh_(nh), current_state_(MissionState::WAITING_START), 
-          ego_nav_status_(0), start_command_received_(false)
+    MissionController(ros::NodeHandle &nh)
+        : nh_(nh), current_state_(MissionState::WAITING_START),
+          ego_nav_status_(0), start_command_received_(false), pcl_enabled_(false)
     {
         // 1. 读取参数 (使用 vector 格式)
         std::vector<double> wp_recog_vec, wp_airdrop_vec, wp_strike_vec;
-        
+
         if (nh_.getParam("mission/wp_recognition", wp_recog_vec) && wp_recog_vec.size() >= 2) {
             wp_recog_ = Eigen::Vector2d(wp_recog_vec[0], wp_recog_vec[1]);
         } else {
             wp_recog_ = Eigen::Vector2d(5.0, 0.0);
             ROS_WARN("wp_recognition not found, using default [5.0, 0.0]");
         }
-        
+
         if (nh_.getParam("mission/wp_airdrop", wp_airdrop_vec) && wp_airdrop_vec.size() >= 2) {
             wp_airdrop_ = Eigen::Vector2d(wp_airdrop_vec[0], wp_airdrop_vec[1]);
         } else {
             wp_airdrop_ = Eigen::Vector2d(10.0, 5.0);
             ROS_WARN("wp_airdrop not found, using default [10.0, 5.0]");
         }
-        
+
         if (nh_.getParam("mission/wp_strike", wp_strike_vec) && wp_strike_vec.size() >= 2) {
             wp_strike_ = Eigen::Vector2d(wp_strike_vec[0], wp_strike_vec[1]);
         } else {
             wp_strike_ = Eigen::Vector2d(15.0, -5.0);
             ROS_WARN("wp_strike not found, using default [15.0, -5.0]");
         }
-        
+
         nh_.param("mission/takeoff_height", takeoff_height_, 0.6);
 
         // 2. 初始化 ROS 接口
@@ -114,9 +127,8 @@ public:
         // 3. 初始化键盘输入
         initKeyboard();
 
-        ROS_INFO("[Boss] Mission Controller Ready!");
-        ROS_INFO(">>> Press [1] to start mission!");
-        printWaypoints();
+        // FCU 连接前显示简单提示
+        ROS_INFO("[FSM] 节点已启动，等待 FCU 连接...");
     }
 
     ~MissionController() {
@@ -161,12 +173,30 @@ public:
         if (key == '1' && current_state_ == MissionState::WAITING_START) {
             start_command_received_ = true;
             current_state_ = MissionState::IDLE;
-            ROS_INFO(">>> Mission Start Command Received!");
+            ROS_INFO(" ");
+            ROS_INFO("============================================");
+            ROS_INFO(">>> Mission Start Command Received!        ");
+            ROS_INFO("============================================");
+            ROS_INFO(" ");
         }
 
         if (!mavros_state_.connected) {
-            ROS_WARN_THROTTLE(1.0, "FCU not connected!");
+            ROS_WARN_THROTTLE(2.0, "[FSM] FCU not connected! Waiting...");
             return;
+        }
+
+        // 【修复】FCU 连接后只显示一次中文提示信息
+        static bool mission_info_shown = false;
+        if (!mission_info_shown && current_state_ == MissionState::WAITING_START) {
+            mission_info_shown = true;
+            ROS_INFO(" ");
+            ROS_INFO("============================================");
+            ROS_INFO("     [Boss] Mission Controller Ready!       ");
+            ROS_INFO("============================================");
+            ROS_INFO(">>> Press [1] to START MISSION!");
+            printWaypoints();
+            ROS_INFO("============================================");
+            ROS_INFO(" ");
         }
 
         switch (current_state_)
@@ -182,7 +212,11 @@ public:
                 init_pos_ = current_pos_;
                 init_yaw_ = current_yaw_;
                 current_state_ = MissionState::TAKEOFF;
+                ROS_INFO(" ");
                 ROS_INFO(">>> [MISSION START] Takeoff point locked, climbing!");
+                ROS_INFO("    Takeoff position: [%.2f, %.2f, %.2f]", init_pos_.x(), init_pos_.y(), init_pos_.z());
+                ROS_INFO("    Takeoff yaw: %.2f deg", init_yaw_ * 180.0 / M_PI);
+                ROS_INFO(" ");
             }
             break;
 
@@ -192,16 +226,21 @@ public:
             {
                 current_state_ = MissionState::WAIT_FOR_MAP;
                 state_start_time_ = ros::Time::now();
+                ROS_INFO(" ");
                 ROS_INFO("[Boss] Reached takeoff height! Hovering to wait for map...");
-                
-                // Enable PCL
-                std_msgs::Bool pcl_msg;
-                pcl_msg.data = true;
-                pcl_enable_pub_.publish(pcl_msg);
-                nh_.setParam("/pcl_enable", true);
-                ROS_INFO("[Boss] PCL Enabled!");
-                
-                buildWalls();
+                ROS_INFO("    Current Z: %.2f, Target Z: %.2f", current_pos_.z(), init_pos_.z() + takeoff_height_);
+                ROS_INFO(" ");
+
+                // 【修复 1】在这里按 1 后才启动 PCL
+                if (!pcl_enabled_) {
+                    std_msgs::Bool pcl_msg;
+                    pcl_msg.data = true;
+                    pcl_enable_pub_.publish(pcl_msg);
+                    nh_.setParam("/pcl_enable", true);
+                    pcl_enabled_ = true;
+                    ROS_INFO("[Boss] PCL Enabled!");
+                    buildWalls();
+                }
             }
             break;
 
@@ -209,17 +248,24 @@ public:
             publishHoverSetpoint(init_pos_.x(), init_pos_.y(), init_pos_.z() + takeoff_height_);
             if ((ros::Time::now() - state_start_time_).toSec() > 2.0)
             {
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 1] Map loaded! Navigate to recognition area!");
+                ROS_INFO("    目标点：[%.2f, %.2f]", wp_recog_.x(), wp_recog_.y());
+                ROS_INFO(" ");
                 sendEgoGoal(wp_recog_);
                 current_state_ = MissionState::NAV_RECOG_AREA;
             }
             break;
 
         case MissionState::NAV_RECOG_AREA:
+            ROS_INFO_THROTTLE(1.0, "[NAV_RECOG] 飞向识别区... 距离=%.2f米", 
+                sqrt(pow(wp_recog_.x() - current_pos_.x(), 2) + pow(wp_recog_.y() - current_pos_.y(), 2)));
             if (ego_nav_status_ == 2) {
                 current_state_ = MissionState::HOVER_RECOGNIZE;
                 state_start_time_ = ros::Time::now();
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 2] Arrived at recognition area, hovering 3s...");
+                ROS_INFO(" ");
             }
             break;
 
@@ -227,17 +273,24 @@ public:
             publishHoverSetpoint(wp_recog_.x(), wp_recog_.y(), init_pos_.z() + takeoff_height_);
             if ((ros::Time::now() - state_start_time_).toSec() > 3.0)
             {
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 3] Recognition done! Navigate to airdrop area!");
+                ROS_INFO("    目标点：[%.2f, %.2f]", wp_airdrop_.x(), wp_airdrop_.y());
+                ROS_INFO(" ");
                 sendEgoGoal(wp_airdrop_);
                 current_state_ = MissionState::NAV_AIRDROP_AREA;
             }
             break;
 
         case MissionState::NAV_AIRDROP_AREA:
+            ROS_INFO_THROTTLE(1.0, "[NAV_AIR] 飞向空投区... 距离=%.2f米", 
+                sqrt(pow(wp_airdrop_.x() - current_pos_.x(), 2) + pow(wp_airdrop_.y() - current_pos_.y(), 2)));
             if (ego_nav_status_ == 2) {
                 current_state_ = MissionState::HOVER_AIRDROP;
                 state_start_time_ = ros::Time::now();
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 4] Arrived at airdrop area, hovering 3s...");
+                ROS_INFO(" ");
             }
             break;
 
@@ -245,17 +298,24 @@ public:
             publishHoverSetpoint(wp_airdrop_.x(), wp_airdrop_.y(), init_pos_.z() + takeoff_height_);
             if ((ros::Time::now() - state_start_time_).toSec() > 3.0)
             {
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 5] Airdrop done! Navigate to strike area!");
+                ROS_INFO("    目标点：[%.2f, %.2f]", wp_strike_.x(), wp_strike_.y());
+                ROS_INFO(" ");
                 sendEgoGoal(wp_strike_);
                 current_state_ = MissionState::NAV_STRIKE_AREA;
             }
             break;
 
         case MissionState::NAV_STRIKE_AREA:
+            ROS_INFO_THROTTLE(1.0, "[NAV_STRIKE] 飞向打击区... 距离=%.2f米", 
+                sqrt(pow(wp_strike_.x() - current_pos_.x(), 2) + pow(wp_strike_.y() - current_pos_.y(), 2)));
             if (ego_nav_status_ == 2) {
                 current_state_ = MissionState::LASER_STRIKE;
                 state_start_time_ = ros::Time::now();
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 6] Arrived at strike area, hovering 2s...");
+                ROS_INFO(" ");
             }
             break;
 
@@ -263,25 +323,37 @@ public:
             publishHoverSetpoint(wp_strike_.x(), wp_strike_.y(), init_pos_.z() + takeoff_height_);
             if ((ros::Time::now() - state_start_time_).toSec() > 2.0)
             {
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 7] Strike done! Return to launch!");
+                ROS_INFO("    返航目标：[%.2f, %.2f]", init_pos_.x(), init_pos_.y());
+                ROS_INFO(" ");
                 sendEgoGoal(Eigen::Vector2d(init_pos_.x(), init_pos_.y()));
                 current_state_ = MissionState::RETURN_TO_LAUNCH;
             }
             break;
 
         case MissionState::RETURN_TO_LAUNCH:
+            ROS_INFO_THROTTLE(1.0, "[RTL] 返回起飞点... 距离=%.2f米", 
+                sqrt(pow(init_pos_.x() - current_pos_.x(), 2) + pow(init_pos_.y() - current_pos_.y(), 2)));
             if (ego_nav_status_ == 2) {
                 current_state_ = MissionState::LANDING;
+                ROS_INFO(" ");
                 ROS_INFO(">>> [Task 8] Back at launch point, landing...");
+                ROS_INFO(" ");
             }
             break;
 
         case MissionState::LANDING:
             publishHoverSetpoint(init_pos_.x(), init_pos_.y(), current_pos_.z() - 0.2);
+            ROS_INFO_THROTTLE(0.5, "[LANDING] 下降中... 当前 Z=%.2f", current_pos_.z());
             if (current_pos_.z() < init_pos_.z() + 0.1)
             {
                 current_state_ = MissionState::FINISHED;
-                ROS_INFO(">>> Mission Complete!");
+                ROS_INFO(" ");
+                ROS_INFO("============================================");
+                ROS_INFO(">>> Mission Complete! 任务完成！            ");
+                ROS_INFO("============================================");
+                ROS_INFO(" ");
             }
             break;
 
@@ -301,6 +373,10 @@ private:
         goal_msg.pose.position.y = target.y();
         goal_msg.pose.position.z = init_pos_.z() + takeoff_height_;
         goal_msg.pose.orientation.w = 1.0;
+        
+        ROS_INFO("[FSM] 发送 EGO 目标点：x=%.2f, y=%.2f, z=%.2f", 
+                 goal_msg.pose.position.x, goal_msg.pose.position.y, goal_msg.pose.position.z);
+        
         ego_goal_pub_.publish(goal_msg);
         ego_nav_status_ = 1;
     }
@@ -317,10 +393,14 @@ private:
                         mavros_msgs::PositionTarget::IGNORE_AFZ |
                         mavros_msgs::PositionTarget::IGNORE_YAW_RATE;
 
-        msg.position.x = x;
-        msg.position.y = y;
-        msg.position.z = z;
-        msg.yaw = init_yaw_;
+        // 【修复】位置坐标也需要 ENU 转 NED
+        // ENU -> NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
+        msg.position.x = y;  // NED x = ENU y
+        msg.position.y = x;  // NED y = ENU x
+        msg.position.z = -z; // NED z = -ENU z
+
+        // 【修复】yaw 也需要转换：yaw_ned = PI/2 - yaw_enu
+        msg.yaw = M_PI_2 - current_yaw_;
 
         setpoint_pub_.publish(msg);
     }
