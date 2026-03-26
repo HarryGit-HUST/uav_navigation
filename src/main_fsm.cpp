@@ -132,11 +132,12 @@ public:
         // 全权交由 ego_controller_node 接管飞行！我们只负责监听是否到达。
         // =================================================================
         case MissionState::NAV_RECOG_AREA:
+            ROS_INFO_THROTTLE(1.0, "[FSM-Boss] 任务一：正在前往识别区，等待小脑(Ego)汇报... 当前状态码: %d", ego_nav_status_);
             if (ego_nav_status_ == 2)
-            { // 2 表示 ego_controller 汇报已到达
+            {
                 current_state_ = MissionState::HOVER_RECOGNIZE;
                 state_start_time_ = ros::Time::now();
-                ROS_INFO(">>>[任务二] 到达识别区，接管飞控，开始 3 秒悬停...");
+                ROS_INFO(">>>[任务二] 到达识别区！FSM 接管飞控，执行定点悬停...");
             }
             break;
 
@@ -152,6 +153,7 @@ public:
             break;
 
         case MissionState::NAV_AIRDROP_AREA:
+            ROS_INFO_THROTTLE(1.0, "[FSM-Boss] 任务三：正在前往投放区，等待小脑(Ego)汇报... 当前状态码: %d", ego_nav_status_);
             if (ego_nav_status_ == 2)
             {
                 current_state_ = MissionState::HOVER_AIRDROP;
@@ -172,6 +174,7 @@ public:
             break;
 
         case MissionState::NAV_STRIKE_AREA:
+            ROS_INFO_THROTTLE(1.0, "[FSM-Boss] 任务五：正在前往攻击阵位，等待小脑(Ego)汇报... 当前状态码: %d", ego_nav_status_);
             if (ego_nav_status_ == 2)
             {
                 current_state_ = MissionState::LASER_STRIKE;
