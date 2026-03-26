@@ -10,8 +10,9 @@
 
     <!-- 注意 2：空间降维核心封印！-->
     <!-- 如果你的定高是 0.6m，这里设置范围刚好卡住这层空间 -->
-    <arg name="map_size_z_" value="0.30"/>  <!-- 原来是 1.20 -->
-    <arg name="ground_height" value="0.6"/> <!-- 原来是 0.3。这样 Z 轴就被卡死在 0.4 到 0.8 之间 -->
+  <!-- 注意 2：空间降维核心封印！-->
+    <arg name="map_size_z_" value="1.50"/>  <!-- 天花板高度 1.5 米 -->
+    <arg name="ground_height" value="0.0"/> <!-- 地板高度设为 0，防止把起飞点当成地下 -->
 
     <!-- 里程计和点云话题 -->
     <arg name="odometry_topic" value="/mavros/local_position/odom"/>

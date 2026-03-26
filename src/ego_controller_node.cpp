@@ -47,7 +47,6 @@ void fsmGoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
     ROS_INFO("[Ego执行器] 收到长官命令！前往新目标: X=%.2f, Y=%.2f", msg->pose.position.x, msg->pose.position.y);
     ROS_INFO("===========================================\n");
 
-    // 锁死收到命令瞬间的坐标，作为安全等待点
     hover_x = current_odom.pose.pose.position.x;
     hover_y = current_odom.pose.pose.position.y;
     hover_z = current_goal.pose.position.z;
@@ -55,7 +54,6 @@ void fsmGoalCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
 
     ego_goal_pub.publish(current_goal);
 
-    // 【修复丢包】顺手发一个 Trigger 信号唤醒 Ego-Planner
     geometry_msgs::PoseStamped trigger_msg;
     trigger_msg.header.stamp = ros::Time::now();
     trigger_msg.header.frame_id = "world";
@@ -99,7 +97,6 @@ int main(int argc, char **argv)
         }
 
         mavros_msgs::PositionTarget setpoint;
-        // 【完全继承老代码逻辑】
         setpoint.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; // 1
         setpoint.type_mask = 3040;                                                // 掩码3040：同时监听 position 和 velocity！
 
@@ -115,24 +112,18 @@ int main(int argc, char **argv)
             }
             else if (has_traj)
             {
-                // 把 Ego-planner 算出来的期望位置和速度，通过 ENU 转 NED 丢给飞控
-                setpoint.position.x = current_traj_cmd.position.y;
-                setpoint.position.y = current_traj_cmd.position.x;
-                setpoint.position.z = -current_traj_cmd.position.z;
+                // 【拨乱反正】不再手动翻转！直接把 Ego 的输出塞给飞控，MAVROS 会自动处理！
+                setpoint.position.x = current_traj_cmd.position.x;
+                setpoint.position.y = current_traj_cmd.position.y;
+                setpoint.position.z = current_traj_cmd.position.z;
 
-                setpoint.velocity.x = current_traj_cmd.velocity.y;
-                setpoint.velocity.y = current_traj_cmd.velocity.x;
+                setpoint.velocity.x = current_traj_cmd.velocity.x;
+                setpoint.velocity.y = current_traj_cmd.velocity.y;
                 setpoint.velocity.z = 0;
 
-                double yaw_ned = M_PI / 2.0 - current_traj_cmd.yaw;
-                while (yaw_ned > M_PI)
-                    yaw_ned -= 2.0 * M_PI;
-                while (yaw_ned < -M_PI)
-                    yaw_ned += 2.0 * M_PI;
-                setpoint.yaw = yaw_ned;
+                setpoint.yaw = current_traj_cmd.yaw;
 
-                ROS_INFO_THROTTLE(1.0, "[Ego执行器] 距目标:%.2fm | 目标系 NED 速度(%.2f,%.2f)",
-                                  dist, setpoint.velocity.x, setpoint.velocity.y);
+                ROS_INFO_THROTTLE(1.0, "[Ego执行器] 距目标:%.2fm | 原生系发送速度(%.2f,%.2f)", dist, setpoint.velocity.x, setpoint.velocity.y);
 
                 mavros_cmd_pub.publish(setpoint);
             }
@@ -140,34 +131,24 @@ int main(int argc, char **argv)
             {
                 ROS_WARN_THROTTLE(1.0, "[Ego执行器] 等待小脑轨迹，安全定点悬停中...");
 
-                // 【丢包防护终极修复】：如果卡在这里超过 1 秒，疯狂重发目标和唤醒包！
                 if ((ros::Time::now() - last_retry_time).toSec() > 1.0)
                 {
                     ego_goal_pub.publish(current_goal);
-
                     geometry_msgs::PoseStamped trigger_msg;
                     trigger_msg.header.stamp = ros::Time::now();
                     trigger_msg.header.frame_id = "world";
                     trigger_pub.publish(trigger_msg);
-
                     ROS_WARN("[Ego执行器] 小脑未响应！已重新发送目标与唤醒信号...");
                     last_retry_time = ros::Time::now();
                 }
 
-                setpoint.position.x = hover_y;
-                setpoint.position.y = hover_x;
-                setpoint.position.z = -hover_z;
-
+                setpoint.position.x = hover_x;
+                setpoint.position.y = hover_y;
+                setpoint.position.z = hover_z;
                 setpoint.velocity.x = 0;
                 setpoint.velocity.y = 0;
                 setpoint.velocity.z = 0;
-
-                double hover_yaw_ned = M_PI / 2.0 - hover_yaw;
-                while (hover_yaw_ned > M_PI)
-                    hover_yaw_ned -= 2.0 * M_PI;
-                while (hover_yaw_ned < -M_PI)
-                    hover_yaw_ned += 2.0 * M_PI;
-                setpoint.yaw = hover_yaw_ned;
+                setpoint.yaw = hover_yaw;
 
                 mavros_cmd_pub.publish(setpoint);
             }

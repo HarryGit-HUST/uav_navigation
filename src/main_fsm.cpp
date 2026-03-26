@@ -233,27 +233,25 @@ private:
     // ==========================================================
     // publishSetpoint：位置 + 速度混合控制
     // ==========================================================
+    // ==========================================================
+    // publishSetpoint：位置 + 速度混合控制
+    // ==========================================================
     void publishSetpoint(const Eigen::Vector2d &xy, const Eigen::Vector2d &vel_xy, double z, double yaw)
     {
         mavros_msgs::PositionTarget msg;
-        msg.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED;
-        msg.type_mask = 3040;  // 0b101111100000: 启用位置 x,y,z + 速度 x,y
+        msg.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; // 1
+        msg.type_mask = 3040;                                                // 0b101111100000
 
-        // ENU 到 NED 坐标转换
-        msg.position.x = xy.y();
-        msg.position.y = xy.x();
-        msg.position.z = -z;
+        // 【拨乱反正】撤销手动翻转，还你原本能飞的直传代码！
+        msg.position.x = xy.x();
+        msg.position.y = xy.y();
+        msg.position.z = z; // 正数就是向上！
 
-        msg.velocity.x = vel_xy.y();
-        msg.velocity.y = vel_xy.x();
+        msg.velocity.x = vel_xy.x();
+        msg.velocity.y = vel_xy.y();
         msg.velocity.z = 0;
 
-        double yaw_ned = M_PI / 2.0 - yaw;
-        while (yaw_ned > M_PI)
-            yaw_ned -= 2.0 * M_PI;
-        while (yaw_ned < -M_PI)
-            yaw_ned += 2.0 * M_PI;
-        msg.yaw = yaw_ned;
+        msg.yaw = yaw;
 
         setpoint_pub_.publish(msg);
     }
