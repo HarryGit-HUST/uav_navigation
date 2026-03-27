@@ -60,14 +60,14 @@ private:
 public:
     MissionController(ros::NodeHandle &nh) : nh_(nh), current_state_(MissionState::IDLE), ego_nav_status_(0)
     {
-        // 1. 【完美替换】使用你指定的读取参数方式
-        nh_.param("mission/wp_recog_x", wp_recog_.x(), 5.0);
-        nh_.param("mission/wp_recog_y", wp_recog_.y(), 0.0);
-        nh_.param("mission/wp_airdrop_x", wp_airdrop_.x(), 10.0);
-        nh_.param("mission/wp_airdrop_y", wp_airdrop_.y(), 5.0);
-        nh_.param("mission/wp_strike_x", wp_strike_.x(), 15.0);
-        nh_.param("mission/wp_strike_y", wp_strike_.y(), -5.0);
-        nh_.param("mission/takeoff_height", takeoff_height_, 1.2);
+        // 1. 读取参数（从节点私有命名空间读取）
+        nh_.param<double>("mission/takeoff_height", takeoff_height_, 0.6);
+        nh_.param<double>("mission/wp_recog_x", wp_recog_.x(), 5.0);
+        nh_.param<double>("mission/wp_recog_y", wp_recog_.y(), 0.0);
+        nh_.param<double>("mission/wp_airdrop_x", wp_airdrop_.x(), 10.0);
+        nh_.param<double>("mission/wp_airdrop_y", wp_airdrop_.y(), 5.0);
+        nh_.param<double>("mission/wp_strike_x", wp_strike_.x(), 15.0);
+        nh_.param<double>("mission/wp_strike_y", wp_strike_.y(), -5.0);
 
         // 2. 初始化 ROS 接口
         state_sub_ = nh_.subscribe<mavros_msgs::State>("/mavros/state", 10, &MissionController::stateCb, this);
@@ -111,6 +111,8 @@ public:
         case MissionState::TAKEOFF:
             // 【完全继承老代码逻辑】高度就是 z + takeoff_height
             publishSetpoint(Eigen::Vector2d(init_pos_.x(), init_pos_.y()), Eigen::Vector2d(0, 0), init_pos_.z() + takeoff_height_, init_yaw_);
+            ROS_INFO("[TAKEOFF] 当前高度=%.2f, 目标高度=%.2f, takeoff_height=%.2f", 
+                     current_pos_.z(), init_pos_.z() + takeoff_height_, takeoff_height_);
             if (std::abs(current_pos_.z() - (init_pos_.z() + takeoff_height_)) < 0.15)
             {
                 current_state_ = MissionState::WAIT_FOR_MAP;
@@ -229,15 +231,15 @@ private:
     }
 
     // ==========================================================
-    // 【完美继承老代码】你的 publishSetpoint，不动一分一毫！
+    // publishSetpoint：位置 + 速度混合控制
     // ==========================================================
     void publishSetpoint(const Eigen::Vector2d &xy, const Eigen::Vector2d &vel_xy, double z, double yaw)
     {
         mavros_msgs::PositionTarget msg;
-        msg.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; // 即 1
-        msg.type_mask = 3040;                                                // 核心！同时监听位置和速度！
+        msg.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED;
+        msg.type_mask = 3040;  // 0b101111100000: 启用位置 x,y,z + 速度 x,y
 
-        // 【致命 Bug 终极修复】ENU 到 NED 的十字翻转！
+        // ENU 到 NED 坐标转换
         msg.position.x = xy.y();
         msg.position.y = xy.x();
         msg.position.z = -z;
@@ -327,7 +329,7 @@ private:
 int main(int argc, char **argv)
 {
     setlocale(LC_ALL, "");
-    ros::init(argc, argv, "main_fsm_node");
+    ros::init(argc, argv, "demo_fsm_node");
     ros::NodeHandle nh("~");
 
     // 【绝杀修复】阻断式等待：加载完参数后，程序死等键盘输入，绝对不刷屏！

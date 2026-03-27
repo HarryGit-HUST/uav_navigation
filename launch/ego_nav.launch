@@ -1,27 +1,27 @@
 <launch>
-  <!-- 注意1：把所有的 find mission 全部替换为 find uav_navigation -->
+  <!-- 注意 1：把所有的 find mission 全部替换为 find uav_navigation -->
   <include file="$(find uav_navigation)/launch/advanced_param.xml">
-  
+
     <!-- 地图尺寸 -->
     <arg name="map_size_x_" value="50.0"/>
     <arg name="map_size_y_" value="50.0"/>
     <arg name="map_origin_x_" value="-25.0"/>
     <arg name="map_origin_y_" value="-25.0"/>
 
-    <!-- 注意2：空间降维核心封印！-->
+    <!-- 注意 2：空间降维核心封印！-->
     <!-- 如果你的定高是 0.6m，这里设置范围刚好卡住这层空间 -->
     <arg name="map_size_z_" value="0.30"/>  <!-- 原来是 1.20 -->
     <arg name="ground_height" value="0.6"/> <!-- 原来是 0.3。这样 Z 轴就被卡死在 0.4 到 0.8 之间 -->
 
     <!-- 里程计和点云话题 -->
     <arg name="odometry_topic" value="/mavros/local_position/odom"/>
-    <!-- 这里接收的是你第一步写的“加厚点云”的发布话题，假设还是 /cloud_registered -->
+    <!-- 这里接收的是你第一步写的"加厚点云"的发布话题，假设还是 /cloud_registered -->
     <arg name="cloud_topic" value="/cloud_registered"/>
     <arg name="scan_topic" value=""/>
 
     <arg name="max_vel" value="1.0" />
     <arg name="max_acc" value="1.0" />
-    <arg name="planning_horizon" value="5.0" /> 
+    <arg name="planning_horizon" value="5.0" />
     <arg name="use_distinctive_trajs" value="false" />
 
     <!-- 其他参数保留 -->
@@ -39,15 +39,15 @@
     <param name="traj_server/time_forward" value="1.0" type="double"/>
     <param name="traj_server/limit_yaw_change" value="0.0" type="double"/>
   </node>
-  
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find uav_navigation)/launch/ego.rviz" required="false" />
- 
-  <!-- 加载比赛参数 -->
-  <rosparam file="$(find uav_navigation)/config/mission_params.yaml" command="load" />
 
-  <!-- 注意3：在这里直接启动你用 C++ 写的 ego_controller_node -->
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find uav_navigation)/launch/ego.rviz" required="false" />
+
+  <!-- 注意 3：在这里直接启动你用 C++ 写的 ego_controller_node -->
   <node pkg="uav_navigation" name="ego_controller_node" type="ego_controller_node" output="screen" />
    <!-- 2. 【新增】启动 C++ 主控状态机节点（指挥官：全自动比赛逻辑） -->
   <!-- 只有加上这一行，你写的那个 MissionController 才会运行 -->
-  <node pkg="uav_navigation" name="demo_fsm_node" type="demo_fsm_node" output="screen" />
+  <node pkg="uav_navigation" name="demo_fsm_node" type="demo_fsm_node" output="screen">
+    <!-- 加载比赛参数到节点私有命名空间 -->
+    <rosparam file="$(find uav_navigation)/config/mission_params.yaml" command="load" />
+  </node>
 </launch>
