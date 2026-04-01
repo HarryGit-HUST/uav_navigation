@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 # 【中文编码修复】强制设置 UTF-8 环境变量，并导出给 tmux 继承
 export LANG=zh_CN.UTF-8
@@ -7,13 +7,13 @@ export ROS_LOG_DIR=$HOME/.ros/log
 
 # 【关键修复】tmux 默认会清空环境变量，需要配置 tmux 保留 UTF-8 支持
 # 在 tmux.conf 中设置或启动时传入
-tmux set-option -gq default-command "/bin/bash" 2>/dev/null
+tmux set-option -gq default-command "/bin/zsh" 2>/dev/null
 
 # Session 名称
 SESSION="ego_planner_session"
 
 # ================= 配置路径 =================
-MAIN_WS=~/first_task_ws
+MAIN_WS=~/raicom_ws
 PX4_PATH=/home/jetson/Libraries/PX4-Autopilot
 
 # 清理旧环境
@@ -39,8 +39,8 @@ tmux send-keys -t $SESSION:0.0 'roscore' C-m
 tmux split-window -h -t $SESSION:0
 tmux send-keys -t $SESSION:0.1 "sleep 3; \
 export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; \
-source ${MAIN_WS}/devel/setup.bash; \
-source ${PX4_PATH}/Tools/setup_gazebo.bash ${PX4_PATH} ${PX4_PATH}/build/px4_sitl_default; \
+source ${MAIN_WS}/devel/setup.zsh; \
+source ${PX4_PATH}/Tools/setup_gazebo.zsh ${PX4_PATH} ${PX4_PATH}/build/px4_sitl_default; \
 export ROS_PACKAGE_PATH=\$ROS_PACKAGE_PATH:${PX4_PATH}:${PX4_PATH}/Tools/sitl_gazebo; \
 echo '============================================'; \
 echo '  启动 Gazebo 仿真'; \
@@ -55,13 +55,13 @@ tmux select-layout -t $SESSION:0 tiled
 # ====================================================
 tmux new-window -t $SESSION:1 -n "perception"
 # Pane 1.0: 跑你以前的 PCL 处理脚本，输出 /projected_accumulated_cloud
-tmux send-keys -t $SESSION:1.0 "sleep 8; source ${MAIN_WS}/devel/setup.bash; cd ${MAIN_WS}/src/pcl_detection2/shell; bash pcl_detection.sh" C-m
+tmux send-keys -t $SESSION:1.0 "sleep 8; source ${MAIN_WS}/devel/setup.zsh; cd ${MAIN_WS}/src/pcl_detection2/shell; zsh pcl_detection.sh" C-m
 
 # Pane 1.1: 跑点云拉伸节点，转成 3D 发给 Ego-Planner
 tmux split-window -h -t $SESSION:1
 tmux send-keys -t $SESSION:1.1 "export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8; \
 echo '等待 Gazebo 启动...'; sleep 17; \
-source ${MAIN_WS}/devel/setup.bash; rosrun uav_navigation cloud_extruder" C-m
+source ${MAIN_WS}/devel/setup.zsh; rosrun uav_navigation cloud_extruder" C-m
 tmux select-layout -t $SESSION:1 tiled
 
 # ====================================================
@@ -74,7 +74,7 @@ tmux send-keys -t $SESSION:2.0 "sleep 5; rostopic echo /mavros/local_position/po
 
 # Pane 2.1: 启动终极任务！包含 Ego + 翻译官 + 你等待按1的主控
 tmux split-window -h -t $SESSION:2
-tmux send-keys -t $SESSION:2.1 "sleep 12; source ${MAIN_WS}/devel/setup.bash; roslaunch uav_navigation ego_nav.launch" C-m
+tmux send-keys -t $SESSION:2.1 "sleep 12; source ~/ego_ws/devel/setup.zsh; source ${MAIN_WS}/devel/setup.zsh; roslaunch uav_navigation ego_nav.launch" C-m
 tmux select-layout -t $SESSION:2 tiled
 
 # ====================================================
