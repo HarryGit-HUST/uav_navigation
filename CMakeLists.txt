@@ -57,18 +57,17 @@ add_executable(ego_controller_node src/ego_controller_node.cpp)
 target_link_libraries(ego_controller_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 # ==========================================================
-# 3. 测试示例模块 C：FSM Demo (交给队友 B 参考的范例)
+# 【注意】测试用的 demo_fsm_node.cpp 仅用于本地测试，严禁参与最终编译！
+# 避免与主控队友的真实 FSM 节点产生冲突。交接前已注释。
 # ==========================================================
-add_executable(demo_fsm_node src/main_fsm.cpp)
-target_link_libraries(demo_fsm_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
-
+# add_executable(demo_fsm_node src/demo_fsm_node.cpp)
+# target_link_libraries(demo_fsm_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 #############
 ## Install ##
 #############
-
-## Mark executables for installation
-install(TARGETS ego_controller_node cloud_extruder demo_fsm_node
+# 同样，在 install 里删掉 demo_fsm_node
+install(TARGETS ego_controller_node cloud_extruder
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
