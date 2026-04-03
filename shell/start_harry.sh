@@ -49,7 +49,7 @@ tmux select-layout -t $SESSION:0 tiled
 # ====================================================
 tmux new-window -t $SESSION:1 -n "perception"
 # Pane 1.0: PCL 处理脚本 (如果内部是 bash 脚本，依然用 bash 调用)
-tmux send-keys -t $SESSION:1.0 "sleep 8; source ${MAIN_WS}/devel/setup.zsh; cd ${MAIN_WS}/src/pcl_detection2/shell; /bin/zsh pcl_detection.sh" C-m
+tmux send-keys -t $SESSION:1.0 "sleep 8; source ${MAIN_WS}/devel/setup.zsh; cd ${MAIN_WS}/src/pcl_detection2/shell; /bin/bash pcl_detection.sh" C-m
 
 # Pane 1.1: 点云拉伸节点
 tmux split-window -h -t $SESSION:1
