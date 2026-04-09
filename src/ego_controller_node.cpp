@@ -96,7 +96,10 @@ int main(int argc, char **argv) {
         ros::spinOnce();
         if (!has_odom) { rate.sleep(); continue; }
 
-        if (has_traj && (ros::Time::now() - last_traj_time).toSec() > 0.5) {
+        // 【绝杀修复】加上 nav_state == FLYING 的前提！
+        // 因为到达(ARRIVED)或待机(IDLE)时，脊髓本来就应该闭嘴！
+        if (nav_state == FLYING && has_traj && (ros::Time::now() - last_traj_time).toSec() > 0.5)
+        {
             ROS_ERROR("[Ego执行器] 警报！/position_cmd 数据流中断！降级为悬停模式！");
             has_traj = false;
             hover_x = current_odom.pose.pose.position.x;

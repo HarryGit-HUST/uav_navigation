@@ -7,7 +7,7 @@
 ros::Publisher cloud_pub;
 
 // 【新增】定义一个全局的强度过滤阈值
-double intensity_threshold = 10.0; 
+double intensity_threshold = 10.0;
 
 void cloudCallback(const sensor_msgs::PointCloud2ConstPtr &msg)
 {
@@ -15,39 +15,92 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr &msg)
     pcl::PointCloud<pcl::PointXYZI> input_cloud;
     pcl::fromROSMsg(*msg, input_cloud);
 
-    // 【修复闪烁】防空包过滤！如果 PCL 这帧没处理出来障碍物，宁愿不发，也不能发空包清空 Ego 的视野
-    if (input_cloud.empty())
-        return;
-
     pcl::PointCloud<pcl::PointXYZI> output_cloud;
 
-    // 假设定高 0.6m，拉伸范围 0.0 到 2.0 米
-    for (const auto &pt : input_cloud.points)
+    // 【优化逻辑】即使 input_cloud 是空的（比如雷达这帧没扫到东西），
+    // 我们也不要直接 return！我们要继续往下走，把“虚拟围墙”发给小脑！
+    if (!input_cloud.empty())
     {
-        // 过滤无穷远无效点
-        if (!std::isfinite(pt.x) || !std::isfinite(pt.y))
-            continue;
-
-        // ==============================================================
-        // 【新增】强度过滤！如果该点的反射强度低于阈值，视为噪点，直接抛弃！
-        // ==============================================================
-        if (pt.intensity < intensity_threshold)
-            continue;
-
-        // 【修复闪烁】间距从 0.1 放大到 0.2，极大减轻点云运算负担，防止延迟卡顿
-        for (float z = 0.0; z <= 2.0; z += 0.2)
+        // 处理真实的雷达障碍物
+        for (const auto &pt : input_cloud.points)
         {
-            pcl::PointXYZI new_pt; // 【核心修改 2】新建的点也必须是 PointXYZI
-            new_pt.x = pt.x;
-            new_pt.y = pt.y;
-            new_pt.z = z;
-            new_pt.intensity = pt.intensity; // 【核心修改 3】继承原生的高强度值
-            
-            output_cloud.points.push_back(new_pt);
+            // 过滤无穷远无效点
+            if (!std::isfinite(pt.x) || !std::isfinite(pt.y))
+                continue;
+
+            // 【防误报】过滤掉离飞机极近的点（半径0.3m内），防止把螺旋桨/起落架当成墙！
+            if (pt.x * pt.x + pt.y * pt.y < 0.09)
+                continue;
+
+            // ==============================================================
+            // 【新增】强度过滤！如果该点的反射强度低于阈值，视为噪点，直接抛弃！
+            // ==============================================================
+            if (pt.intensity < intensity_threshold)
+                continue;
+
+            // 【修复闪烁】间距从 0.1 放大到 0.2，极大减轻点云运算负担
+            for (float z = 0.0; z <= 2.0; z += 0.2)
+            {
+                pcl::PointXYZI new_pt;
+                new_pt.x = pt.x;
+                new_pt.y = pt.y;
+                new_pt.z = z;
+                new_pt.intensity = pt.intensity; // 继承原生的高强度值
+
+                output_cloud.points.push_back(new_pt);
+            }
         }
     }
 
-    // 如果过滤完噪点后点云空了，就不发布，维持 Ego 脑子里的旧地图
+    // ==============================================================
+    // 【核心新增】无中生有：构建 3D 高精电子围栏 (Virtual Walls)
+    // 注意：请根据你们比赛场地的实际大小，修改下面的 4 个边界值！
+    // ==============================================================
+    float x_min = -1.0, x_max = 4.0; // 场地 X 轴前后边界 (米)
+    float y_min = -1.45, y_max = 3.15;  // 场地 Y 轴左右边界 (米)
+    float z_min = 0.0, z_max = 4.0;   // 围墙高度范围
+    float step = 0.2;                 // 围墙点云的间距密度
+    float wall_intensity = 255.0;     // 赋予围墙最高强度值，防止被误杀！
+
+    // 沿 X 轴画南北两堵墙
+    for (float x = x_min; x <= x_max; x += step)
+    {
+        for (float z = z_min; z <= z_max; z += step)
+        {
+            pcl::PointXYZI pt_south, pt_north;
+            pt_south.x = x;
+            pt_south.y = y_min;
+            pt_south.z = z;
+            pt_south.intensity = wall_intensity;
+            pt_north.x = x;
+            pt_north.y = y_max;
+            pt_north.z = z;
+            pt_north.intensity = wall_intensity;
+            output_cloud.points.push_back(pt_south);
+            output_cloud.points.push_back(pt_north);
+        }
+    }
+
+    // 沿 Y 轴画东西两堵墙
+    for (float y = y_min; y <= y_max; y += step)
+    {
+        for (float z = z_min; z <= z_max; z += step)
+        {
+            pcl::PointXYZI pt_west, pt_east;
+            pt_west.x = x_min;
+            pt_west.y = y;
+            pt_west.z = z;
+            pt_west.intensity = wall_intensity;
+            pt_east.x = x_max;
+            pt_east.y = y;
+            pt_east.z = z;
+            pt_east.intensity = wall_intensity;
+            output_cloud.points.push_back(pt_west);
+            output_cloud.points.push_back(pt_east);
+        }
+    }
+
+    // 如果连围墙都没生成（理论上不可能），就不发布
     if (output_cloud.empty())
         return;
 
