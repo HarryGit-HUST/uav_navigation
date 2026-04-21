@@ -106,7 +106,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr &msg) {
 
     // 【修复闪烁】强行绑定 world 坐标系，绕过 TF 变换带来的跳变延迟
     output_msg.header.frame_id = "world";
-    output_msg.header.stamp    = ros::Time::now();
+    output_msg.header.stamp = msg->header.stamp; // 保持时间戳对齐
 
     cloud_pub.publish(output_msg);
 }
